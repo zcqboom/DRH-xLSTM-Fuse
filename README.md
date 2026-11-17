@@ -1,7 +1,4 @@
 # DRH-xLSTM-Fuse
-DRH-xLSTM-Fuse
-# Dual-Relation Hypergraph-Guided xLSTM and Adaptive Wavelet-Domain Refinement for Multi-Focus Image Fusion
-
 <div align="center">
     <h3>
         Official implementation of Dual-Relation Hypergraph-Guided xLSTM and Adaptive Wavelet-Domain Refinement for Multi-Focus Image Fusion
