@@ -1,4 +1,4 @@
-import cv2
+
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch
@@ -6,10 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import networkx as nx
-from typing import Tuple, List, Union, Optional
+from typing import Tuple, List, Union
 import warnings
-
-from matplotlib import pyplot as plt
 
 from xlstm_test.vision_lstm import (
     ViLBlock, SequenceTraversal,
@@ -19,8 +17,7 @@ from xlstm_test.vision_lstm import (
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if device.type == "cpu":
-    warnings.warn("cpu!", UserWarning)
-
+    warnings.warn("检测到CPU环境，xLSTM在CPU上运行速度较慢，建议使用CUDA GPU运行！", UserWarning)
 
 class HGMambaConfig:
     def __init__(self,
@@ -315,7 +312,6 @@ class HypergraphScanning(nn.Module):
         sequence_feat = torch.stack(all_sequence_feat, dim=0)
         return sequence_feat, all_sequence_idx
 
-
 class CrossViLLayer(nn.Module):
 
     def __init__(self, dim, direction, expansion=2, qkv_block_size=4,
@@ -521,6 +517,7 @@ class HGXLSMBlock(nn.Module):
         X_mp_rule = self.message_passing_rule(X, H_rule)
         X_mp_sim = self.message_passing_sim(X, H_sim)
 
+
         seq_feat_rule, seq_idx_rule = self.hypergraph_scanning_rule(X_mp_rule, H_rule)
         seq_feat_sim, seq_idx_sim = self.hypergraph_scanning_sim(X_mp_sim, H_sim)
 
@@ -536,6 +533,7 @@ class HGXLSMBlock(nn.Module):
         output = self.norm_res(self.out_proj(X_fused) + residual)
         return output, X_mp_rule, X_mp_sim
 
+
 class HGXLSMFeatureExtractor(nn.Module):
     def __init__(self, config: HGMambaConfig = None, in_channels: int = 3):
         super().__init__()
@@ -550,6 +548,28 @@ class HGXLSMFeatureExtractor(nn.Module):
             for _ in range(self.config.n_layers)
         ])
 
+    def forward_single_img(self, img: torch.Tensor, return_intermediate: bool = True) -> Union[
+        torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
+
+        B, C, H_origin, W_origin = img.shape
+        img_pad, origin_hw = dynamic_pad_img(img, self.tile_size)
+        tiles, meta_info = img2tile(img_pad, self.tile_size)
+        tile_feat = self.tile_encoder(tiles)
+        H_rule, H_sim = self.hypergraph_builder(tile_feat, meta_info)
+        X = tile_feat
+        inter_mp_feats = []
+
+        for layer in self.hgxlstm_layers:
+            X, mp_feat_rule, mp_feat_sim = layer(X, H_rule, H_sim,meta_info, origin_hw)
+
+            inter_mp_feats.append(mp_feat_rule + mp_feat_sim)
+
+        final_feat_map = tile2feat_map(X, meta_info, origin_hw)
+        if return_intermediate:
+            inter_feat_maps = [tile2feat_map(mp_feat, meta_info, origin_hw) for mp_feat in inter_mp_feats]
+            return final_feat_map, inter_feat_maps
+        else:
+            return final_feat_map
 
     def forward(self, img1: torch.Tensor, img2: torch.Tensor = None, return_intermediate: bool = True) -> Union[
         torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]], Tuple[
@@ -560,4 +580,3 @@ class HGXLSMFeatureExtractor(nn.Module):
             out1 = self.forward_single_img(img1, return_intermediate=return_intermediate)
             out2 = self.forward_single_img(img2, return_intermediate=return_intermediate)
             return out1, out2
-
